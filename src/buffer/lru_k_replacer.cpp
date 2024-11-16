@@ -13,6 +13,8 @@
 #include "buffer/lru_k_replacer.h"
 #include "common/exception.h"
 
+#include <limits>
+
 namespace bustub {
 
 LRUKReplacer::LRUKReplacer(size_t num_frames, size_t k) : replacer_size_(num_frames), k_(k) {}
@@ -20,23 +22,32 @@ LRUKReplacer::LRUKReplacer(size_t num_frames, size_t k) : replacer_size_(num_fra
 auto LRUKReplacer::Evict() -> std::optional<frame_id_t> {
   std::lock_guard<std::mutex> lock_guard(latch_);
 
-  if (curr_size_ < replacer_size_) return std::nullopt;
+  if (curr_size_ == 0) return std::nullopt;
 
   frame_id_t evictable_frame;
-  size_t max_kth = 0, kth;
+  double max_kth = 0, kth;
   for (const auto &iter : node_store_) {
     const LRUKNode &node = iter.second;
     if (!node.is_evictable_) continue;
 
-    kth = node.history_.back() - node.history_.front();
+    if (node.history_.size() < node.k_)
+      kth = std::numeric_limits<double>::infinity();
+    else
+      kth = node.history_.back() - node.history_.front();
+
     if (kth > max_kth) {
       max_kth = kth;
       evictable_frame = node.fid_;
-    } else if (kth == max_kth) {
+    }
+    if (kth == std::numeric_limits<double>::infinity()) {
       evictable_frame =
           node.history_.back() < node_store_[evictable_frame].history_.back() ? node.fid_ : evictable_frame;
+      // node.history_.front() < node_store_[evictable_frame].history_.front() ? node.fid_ : evictable_frame;
     }
   }
+  node_store_.erase(evictable_frame);
+  curr_size_--;
+
   return evictable_frame;
 }
 
@@ -49,11 +60,14 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
     node.fid_ = frame_id;
     node.k_ = k_;
     node.history_.push_back(current_timestamp_++);
-    if (node.history_.size() > node.k_) node.history_.pop_front();
 
     node_store_[frame_id] = node;
   } else {
     node_store_[frame_id].history_.push_back(current_timestamp_++);
+  }
+  
+  if (node_store_[frame_id].history_.size() > node_store_[frame_id].k_) {
+    node_store_[frame_id].history_.pop_front();
   }
 }
 
