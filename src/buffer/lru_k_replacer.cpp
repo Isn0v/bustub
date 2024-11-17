@@ -42,7 +42,6 @@ auto LRUKReplacer::Evict() -> std::optional<frame_id_t> {
     if (kth == std::numeric_limits<double>::infinity()) {
       evictable_frame =
           node.history_.back() < node_store_[evictable_frame].history_.back() ? node.fid_ : evictable_frame;
-      // node.history_.front() < node_store_[evictable_frame].history_.front() ? node.fid_ : evictable_frame;
     }
   }
   node_store_.erase(evictable_frame);
