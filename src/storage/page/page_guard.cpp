@@ -32,9 +32,15 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
       frame_(std::move(frame)),
       replacer_(std::move(replacer)),
       bpm_latch_(std::move(bpm_latch)),
-      is_valid_(true),
-      read_page_latch_(std::shared_lock<std::shared_mutex>(frame_->rwlatch_)) {
+      is_valid_(true) {
   frame_->pin_count_++;
+  while (1) {
+    if (frame_->rwlatch_.try_lock_shared()) {
+      break;
+    } else {
+      std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+  }
 }
 
 /**
@@ -82,6 +88,8 @@ ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
  */
 auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & {
   BUSTUB_ENSURE(that.is_valid_, "tried to assign an invalid read guard");
+  if (this == &that) return *this;
+  this->Drop();
 
   page_id_ = that.page_id_;
   frame_ = std::move(that.frame_);
@@ -89,6 +97,7 @@ auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & 
   bpm_latch_ = std::move(that.bpm_latch_);
   is_valid_ = that.is_valid_;
   that.is_valid_ = false;
+
   return *this;
 }
 
@@ -130,6 +139,7 @@ auto ReadPageGuard::IsDirty() const -> bool {
 void ReadPageGuard::Drop() {
   if (!is_valid_) return;
 
+  frame_->rwlatch_.unlock_shared();
   frame_->pin_count_--;
 
   if (frame_->pin_count_ == 0) {
@@ -165,9 +175,15 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
       frame_(std::move(frame)),
       replacer_(std::move(replacer)),
       bpm_latch_(std::move(bpm_latch)),
-      is_valid_(true),
-      write_page_latch_(std::unique_lock<std::shared_mutex>(frame_->rwlatch_)) {
+      is_valid_(true) {
   frame_->pin_count_++;
+  while (1) {
+    if (frame_->rwlatch_.try_lock()) {
+      break;
+    } else {
+      std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+  }
 }
 
 /**
@@ -193,6 +209,7 @@ WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
   replacer_ = std::move(that.replacer_);
   bpm_latch_ = std::move(that.bpm_latch_);
   is_valid_ = that.is_valid_;
+
   that.is_valid_ = false;
 }
 
@@ -215,6 +232,8 @@ WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
  */
 auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard & {
   BUSTUB_ENSURE(that.is_valid_, "tried to assign an invalid write guard");
+  if (this == &that) return *this;
+  this->Drop();
 
   page_id_ = that.page_id_;
   frame_ = std::move(that.frame_);
@@ -222,6 +241,7 @@ auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard
   bpm_latch_ = std::move(that.bpm_latch_);
   is_valid_ = that.is_valid_;
   that.is_valid_ = false;
+
   return *this;
 }
 
@@ -271,6 +291,7 @@ auto WritePageGuard::IsDirty() const -> bool {
 void WritePageGuard::Drop() {
   if (!is_valid_) return;
 
+  frame_->rwlatch_.unlock();
   frame_->pin_count_--;
 
   if (frame_->pin_count_ == 0) {
