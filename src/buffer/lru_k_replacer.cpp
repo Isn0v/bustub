@@ -64,7 +64,7 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
   } else {
     node_store_[frame_id].history_.push_back(current_timestamp_++);
   }
-  
+
   if (node_store_[frame_id].history_.size() > node_store_[frame_id].k_) {
     node_store_[frame_id].history_.pop_front();
   }

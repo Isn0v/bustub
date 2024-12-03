@@ -207,7 +207,6 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
  * returns `std::nullopt`, otherwise returns a `WritePageGuard` ensuring exclusive and mutable access to a page's data.
  */
 auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type) -> std::optional<WritePageGuard> {
-
   return CreatePageGuard<WritePageGuard>(page_id, access_type);
 }
 
@@ -236,9 +235,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
  * returns `std::nullopt`, otherwise returns a `ReadPageGuard` ensuring shared and read-only access to a page's data.
  */
 auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_type) -> std::optional<ReadPageGuard> {
-
   return CreatePageGuard<ReadPageGuard>(page_id, access_type);
-
 }
 
 /**
@@ -367,12 +364,12 @@ auto BufferPoolManager::GetPinCount(page_id_t page_id) -> std::optional<size_t> 
   return frame->pin_count_;
 }
 
-page_id_t BufferPoolManager::GetRelatedPage(frame_id_t frame_id) { 
-    for (auto it = page_table_.begin(); it != page_table_.end(); it++) {
-      if (it->second == frame_id) {
-        return it->first;
-      }
+page_id_t BufferPoolManager::GetRelatedPage(frame_id_t frame_id) {
+  for (auto it = page_table_.begin(); it != page_table_.end(); it++) {
+    if (it->second == frame_id) {
+      return it->first;
     }
-    return INVALID_PAGE_ID;
-   }
+  }
+  return INVALID_PAGE_ID;
+}
 }  // namespace bustub
