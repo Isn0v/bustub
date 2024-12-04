@@ -33,7 +33,8 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
       replacer_(std::move(replacer)),
       bpm_latch_(std::move(bpm_latch)),
       is_valid_(true) {
-  frame_->pin_count_++;
+  // std::scoped_lock lk(*bpm_latch_);
+
   while (1) {
     if (frame_->rwlatch_.try_lock_shared()) {
       break;
@@ -88,6 +89,7 @@ ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
  */
 auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & {
   BUSTUB_ENSURE(that.is_valid_, "tried to assign an invalid read guard");
+
   if (this == &that) return *this;
   this->Drop();
 
@@ -138,15 +140,13 @@ auto ReadPageGuard::IsDirty() const -> bool {
  */
 void ReadPageGuard::Drop() {
   if (!is_valid_) return;
+  std::scoped_lock lk(*bpm_latch_);
 
-  frame_->rwlatch_.unlock_shared();
-  frame_->pin_count_--;
-
-  if (frame_->pin_count_ == 0) {
-    std::lock_guard<std::mutex> lock_guard(*bpm_latch_);
+  if (--frame_->pin_count_ == 0) {
     replacer_->SetEvictable(frame_->frame_id_, true);
   }
 
+  frame_->rwlatch_.unlock_shared();
   is_valid_ = false;
 }
 
@@ -176,7 +176,8 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
       replacer_(std::move(replacer)),
       bpm_latch_(std::move(bpm_latch)),
       is_valid_(true) {
-  frame_->pin_count_++;
+  // std::scoped_lock lk(*bpm_latch_);
+
   while (1) {
     if (frame_->rwlatch_.try_lock()) {
       break;
@@ -290,16 +291,14 @@ auto WritePageGuard::IsDirty() const -> bool {
  */
 void WritePageGuard::Drop() {
   if (!is_valid_) return;
+  std::scoped_lock lk(*bpm_latch_);
 
-  frame_->rwlatch_.unlock();
-  frame_->pin_count_--;
-
-  if (frame_->pin_count_ == 0) {
-    std::lock_guard<std::mutex> lock_guard(*bpm_latch_);
+  if (--frame_->pin_count_ == 0) {
     replacer_->SetEvictable(frame_->frame_id_, true);
     frame_->is_dirty_ = true;
   }
 
+  frame_->rwlatch_.unlock();
   is_valid_ = false;
 }
 

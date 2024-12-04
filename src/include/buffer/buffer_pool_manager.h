@@ -117,8 +117,8 @@ class BufferPoolManager {
   auto Size() const -> size_t;
   auto NewPage() -> page_id_t;
   auto DeletePage(page_id_t page_id) -> bool;
-  auto CheckedWritePage(page_id_t page_id,
-                        AccessType access_type = AccessType::Unknown) -> std::optional<WritePageGuard>;
+  auto CheckedWritePage(page_id_t page_id, AccessType access_type = AccessType::Unknown)
+      -> std::optional<WritePageGuard>;
   auto CheckedReadPage(page_id_t page_id, AccessType access_type = AccessType::Unknown) -> std::optional<ReadPageGuard>;
   auto WritePage(page_id_t page_id, AccessType access_type = AccessType::Unknown) -> WritePageGuard;
   auto ReadPage(page_id_t page_id, AccessType access_type = AccessType::Unknown) -> ReadPageGuard;
@@ -175,31 +175,43 @@ class BufferPoolManager {
   template <typename PageGuard>
   auto CreatePageGuard(page_id_t page_id, AccessType access_type) -> std::optional<PageGuard> {
     if (page_table_.count(page_id) > 0) {
-      auto frame_id = page_table_[page_id];
+      int frame_id;
+      {
+        std::scoped_lock lk(*bpm_latch_);
+        frame_id = page_table_[page_id];
+      }
       replacer_->RecordAccess(frame_id, access_type);
       auto frame = frames_[frame_id];
+
+      frame->pin_count_++;
+      replacer_->SetEvictable(frame_id, false);
       return PageGuard(page_id, frame, replacer_, bpm_latch_);
 
     } else if (!free_frames_.empty()) {
-      auto free_frame_id = free_frames_.front();
-      free_frames_.pop_front();
+      int free_frame_id;
+      {
+        std::scoped_lock lk(*bpm_latch_);
+        free_frame_id = free_frames_.front();
+        free_frames_.pop_front();
+      }
       replacer_->RecordAccess(free_frame_id, access_type);
 
       auto frame = frames_[free_frame_id];
-      page_table_[page_id] = free_frame_id;
+      {
+        std::scoped_lock lk(*bpm_latch_);
+        page_table_[page_id] = free_frame_id;
+      }
 
       auto promise = disk_scheduler_->CreatePromise();
       auto future = promise.get_future();
       disk_scheduler_->Schedule({false, frame->GetDataMut(), page_id, std::move(promise)});
-
       future.get();
+
+      frame->pin_count_++;
+      replacer_->SetEvictable(free_frame_id, false);
       return PageGuard(page_id, frame, replacer_, bpm_latch_);
     } else {
-      std::optional<frame_id_t> opt_frame_id;
-      {
-        std::scoped_lock<std::mutex> lk(*bpm_latch_);
-        opt_frame_id = replacer_->Evict();
-      }
+      std::optional<frame_id_t> opt_frame_id = replacer_->Evict();
 
       if (!opt_frame_id.has_value()) return std::nullopt;
 
@@ -213,14 +225,20 @@ class BufferPoolManager {
         frame->is_dirty_ = false;
       }
 
-      page_table_.erase(GetRelatedPage(frame_id));
-      page_table_[page_id] = frame_id;
+      {
+        std::scoped_lock lk(*bpm_latch_);
+        page_table_.erase(GetRelatedPage(frame_id));
+        page_table_[page_id] = frame_id;
+      }
 
       auto promise = disk_scheduler_->CreatePromise();
       auto future = promise.get_future();
       disk_scheduler_->Schedule({false, frame->GetDataMut(), page_id, std::move(promise)});
 
       future.get();
+
+      frame->pin_count_++;
+      replacer_->SetEvictable(frame_id, false);
       return PageGuard(page_id, frame, replacer_, bpm_latch_);
     }
   }
