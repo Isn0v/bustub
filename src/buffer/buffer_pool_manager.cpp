@@ -122,7 +122,11 @@ auto BufferPoolManager::Size() const -> size_t { return num_frames_; }
  *
  * @return The page ID of the newly allocated page.
  */
-auto BufferPoolManager::NewPage() -> page_id_t { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::NewPage() -> page_id_t {
+  auto page_size = next_page_id_++;
+  disk_scheduler_->IncreaseDiskSpace(page_size);
+  return page_size;
+}
 
 /**
  * @brief Removes a page from the database, both on disk and in memory.
@@ -150,7 +154,22 @@ auto BufferPoolManager::NewPage() -> page_id_t { UNIMPLEMENTED("TODO(P1): Add im
  * @param page_id The page ID of the page we want to delete.
  * @return `false` if the page exists but could not be deleted, `true` if the page didn't exist or deletion succeeded.
  */
-auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
+  if (page_table_.count(page_id) == 0) {
+    return false;
+  }
+
+  frame_id_t frame_id = page_table_[page_id];
+  auto frame = frames_[frame_id];
+  if (frame->pin_count_ > 0) {
+    return false;
+  }
+
+  page_table_.erase(page_id);
+
+  free_frames_.push_front(frame_id);
+  return true;
+}
 
 /**
  * @brief Acquires an optional write-locked guard over a page of data. The user can specify an `AccessType` if needed.
@@ -192,7 +211,7 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool { UNIMPLEMENTED("T
  * returns `std::nullopt`, otherwise returns a `WritePageGuard` ensuring exclusive and mutable access to a page's data.
  */
 auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type) -> std::optional<WritePageGuard> {
-  UNIMPLEMENTED("TODO(P1): Add implementation.");
+  return CreatePageGuard<WritePageGuard>(page_id, access_type);
 }
 
 /**
@@ -220,7 +239,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
  * returns `std::nullopt`, otherwise returns a `ReadPageGuard` ensuring shared and read-only access to a page's data.
  */
 auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_type) -> std::optional<ReadPageGuard> {
-  UNIMPLEMENTED("TODO(P1): Add implementation.");
+  return CreatePageGuard<ReadPageGuard>(page_id, access_type);
 }
 
 /**
@@ -289,7 +308,20 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
  * @param page_id The page ID of the page to be flushed.
  * @return `false` if the page could not be found in the page table, otherwise `true`.
  */
-auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
+  if (page_table_.count(page_id) == 0) {
+    return false;
+  }
+
+  auto frame = frames_[page_table_[page_id]];
+
+  auto promise = disk_scheduler_->CreatePromise();
+  auto future = promise.get_future();
+
+  disk_scheduler_->Schedule({true, frame->GetDataMut(), page_id, std::move(promise)});
+
+  return future.get();
+}
 
 /**
  * @brief Flushes all page data that is in memory to disk.
@@ -301,7 +333,11 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool { UNIMPLEMENTED("TO
  *
  * TODO(P1): Add implementation
  */
-void BufferPoolManager::FlushAllPages() { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+void BufferPoolManager::FlushAllPages() {
+  for (const auto &[page_id, frame_id] : page_table_) {
+    FlushPage(page_id);
+  }
+}
 
 /**
  * @brief Retrieves the pin count of a page. If the page does not exist in memory, return `std::nullopt`.
@@ -328,7 +364,20 @@ void BufferPoolManager::FlushAllPages() { UNIMPLEMENTED("TODO(P1): Add implement
  * @return std::optional<size_t> The pin count if the page exists, otherwise `std::nullopt`.
  */
 auto BufferPoolManager::GetPinCount(page_id_t page_id) -> std::optional<size_t> {
-  UNIMPLEMENTED("TODO(P1): Add implementation.");
+  if (page_table_.count(page_id) == 0) {
+    return std::nullopt;
+  }
+  auto frame = frames_[page_table_[page_id]];
+
+  return frame->pin_count_;
 }
 
+auto BufferPoolManager::GetRelatedPage(frame_id_t frame_id) -> page_id_t {
+  for (auto &it : page_table_) {
+    if (it.second == frame_id) {
+      return it.first;
+    }
+  }
+  return INVALID_PAGE_ID;
+}
 }  // namespace bustub

@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <list>
 #include <memory>
 #include <shared_mutex>
@@ -170,5 +171,76 @@ class BufferPoolManager {
    * stored inside of it. Additionally, you may also want to implement a helper function that returns either a shared
    * pointer to a `FrameHeader` that already has a page's data stored inside of it, or an index to said `FrameHeader`.
    */
+
+  template <typename PageGuard>
+  auto CreatePageGuard(page_id_t page_id, AccessType access_type) -> std::optional<PageGuard> {
+    frame_id_t frame_id;
+    std::shared_ptr<FrameHeader> frame;
+    if (page_table_.count(page_id) > 0) {
+      {
+        std::scoped_lock lk(*bpm_latch_);
+        frame_id = page_table_[page_id];
+      }
+      replacer_->RecordAccess(frame_id, access_type);
+      frame = frames_[frame_id];
+    } else if (!free_frames_.empty()) {
+      int free_frame_id;
+      {
+        std::scoped_lock lk(*bpm_latch_);
+        free_frame_id = free_frames_.front();
+        free_frames_.pop_front();
+      }
+      replacer_->RecordAccess(free_frame_id, access_type);
+
+      frame = frames_[free_frame_id];
+      {
+        std::scoped_lock lk(*bpm_latch_);
+        page_table_[page_id] = free_frame_id;
+      }
+
+      auto promise = disk_scheduler_->CreatePromise();
+      auto future = promise.get_future();
+      disk_scheduler_->Schedule({false, frame->GetDataMut(), page_id, std::move(promise)});
+      future.get();
+      frame_id = free_frame_id;
+    } else {
+      std::optional<frame_id_t> opt_frame_id = replacer_->Evict();
+
+      if (!opt_frame_id.has_value()) {
+        return std::nullopt;
+      }
+
+      frame_id = opt_frame_id.value();
+      replacer_->Remove(frame_id);
+      replacer_->RecordAccess(frame_id, access_type);
+
+      frame = frames_[frame_id];
+      if (frame->is_dirty_) {
+        FlushPage(GetRelatedPage(frame_id));
+        frame->is_dirty_ = false;
+      }
+
+      {
+        std::scoped_lock lk(*bpm_latch_);
+        page_table_.erase(GetRelatedPage(frame_id));
+        page_table_[page_id] = frame_id;
+      }
+
+      auto promise = disk_scheduler_->CreatePromise();
+      auto future = promise.get_future();
+      disk_scheduler_->Schedule({false, frame->GetDataMut(), page_id, std::move(promise)});
+
+      future.get();
+    }
+
+    {
+      std::scoped_lock lk(*bpm_latch_);
+      frame->pin_count_++;
+      replacer_->SetEvictable(frame_id, false);
+    }
+    return PageGuard(page_id, frame, replacer_, bpm_latch_);
+  }
+
+  auto GetRelatedPage(frame_id_t frame_id) -> page_id_t;
 };
 }  // namespace bustub
