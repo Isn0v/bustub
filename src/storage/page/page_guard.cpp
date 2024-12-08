@@ -33,14 +33,11 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
       replacer_(std::move(replacer)),
       bpm_latch_(std::move(bpm_latch)),
       is_valid_(true) {
-  // std::scoped_lock lk(*bpm_latch_);
-
-  while (1) {
+  while (true) {
     if (frame_->rwlatch_.try_lock_shared()) {
       break;
-    } else {
-      std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
+    std::this_thread::sleep_for(std::chrono::microseconds(1));
   }
 }
 
@@ -90,7 +87,9 @@ ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
 auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & {
   BUSTUB_ENSURE(that.is_valid_, "tried to assign an invalid read guard");
 
-  if (this == &that) return *this;
+  if (this == &that) {
+    return *this;
+  }
   this->Drop();
 
   page_id_ = that.page_id_;
@@ -139,7 +138,9 @@ auto ReadPageGuard::IsDirty() const -> bool {
  * TODO(P1): Add implementation.
  */
 void ReadPageGuard::Drop() {
-  if (!is_valid_) return;
+  if (!is_valid_) {
+    return;
+  }
   std::scoped_lock lk(*bpm_latch_);
 
   if (--frame_->pin_count_ == 0) {
@@ -176,14 +177,11 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
       replacer_(std::move(replacer)),
       bpm_latch_(std::move(bpm_latch)),
       is_valid_(true) {
-  // std::scoped_lock lk(*bpm_latch_);
-
-  while (1) {
+  while (true) {
     if (frame_->rwlatch_.try_lock()) {
       break;
-    } else {
-      std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
+    std::this_thread::sleep_for(std::chrono::microseconds(1));
   }
 }
 
@@ -233,7 +231,9 @@ WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
  */
 auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard & {
   BUSTUB_ENSURE(that.is_valid_, "tried to assign an invalid write guard");
-  if (this == &that) return *this;
+  if (this == &that) {
+    return *this;
+  }
   this->Drop();
 
   page_id_ = that.page_id_;
@@ -290,7 +290,9 @@ auto WritePageGuard::IsDirty() const -> bool {
  * TODO(P1): Add implementation.
  */
 void WritePageGuard::Drop() {
-  if (!is_valid_) return;
+  if (!is_valid_) {
+    return;
+  }
   std::scoped_lock lk(*bpm_latch_);
 
   if (--frame_->pin_count_ == 0) {

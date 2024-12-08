@@ -22,18 +22,24 @@ LRUKReplacer::LRUKReplacer(size_t num_frames, size_t k) : replacer_size_(num_fra
 auto LRUKReplacer::Evict() -> std::optional<frame_id_t> {
   std::lock_guard<std::mutex> lock_guard(latch_);
 
-  if (curr_size_ == 0) return std::nullopt;
+  if (curr_size_ == 0) {
+    return std::nullopt;
+  }
 
   frame_id_t evictable_frame;
-  double max_kth = 0, kth;
+  double max_kth = 0;
+  double kth;
   for (const auto &iter : node_store_) {
     const LRUKNode &node = iter.second;
-    if (!node.is_evictable_) continue;
+    if (!node.is_evictable_) {
+      continue;
+    }
 
-    if (node.history_.size() < node.k_)
+    if (node.history_.size() < node.k_) {
       kth = std::numeric_limits<double>::infinity();
-    else
+    } else {
       kth = node.history_.back() - node.history_.front();
+    }
 
     if (kth > max_kth) {
       max_kth = kth;
@@ -90,9 +96,12 @@ void LRUKReplacer::Remove(frame_id_t frame_id) {
   BUSTUB_ASSERT(static_cast<size_t>(frame_id) < replacer_size_, "Invalid frame_id");
   std::lock_guard<std::mutex> lock_guard(latch_);
 
-  if (node_store_.count(frame_id) && !node_store_[frame_id].is_evictable_)
+  if (node_store_.count(frame_id) == 1 && !node_store_[frame_id].is_evictable_) {
     throw std::runtime_error("Tried to remove an unevictable frame");
-  if (node_store_.erase(frame_id)) curr_size_--;
+  }
+  if (node_store_.erase(frame_id) != 0) {
+    curr_size_--;
+  }
 }
 
 auto LRUKReplacer::Size() -> size_t { return curr_size_; }

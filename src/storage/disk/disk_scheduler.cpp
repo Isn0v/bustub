@@ -32,14 +32,17 @@ DiskScheduler::~DiskScheduler() {
 void DiskScheduler::Schedule(DiskRequest r) { request_queue_.Put(std::move(r)); }
 
 void DiskScheduler::StartWorkerThread() {
-  while (1) {
+  while (true) {
     auto request = request_queue_.Get();
-    if (!request.has_value()) return;
+    if (!request.has_value()) {
+      return;
+    }
 
-    if (request->is_write_)
+    if (request->is_write_) {
       disk_manager_->WritePage(request->page_id_, request->data_);
-    else
+    } else {
       disk_manager_->ReadPage(request->page_id_, request->data_);
+    }
 
     request->callback_.set_value(true);
   }

@@ -155,11 +155,15 @@ auto BufferPoolManager::NewPage() -> page_id_t {
  * @return `false` if the page exists but could not be deleted, `true` if the page didn't exist or deletion succeeded.
  */
 auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
-  if (!page_table_.count(page_id)) return false;
+  if (page_table_.count(page_id) == 0) {
+    return false;
+  }
 
   frame_id_t frame_id = page_table_[page_id];
   auto frame = frames_[frame_id];
-  if (frame->pin_count_ > 0) return false;
+  if (frame->pin_count_ > 0) {
+    return false;
+  }
 
   page_table_.erase(page_id);
 
@@ -305,7 +309,9 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
  * @return `false` if the page could not be found in the page table, otherwise `true`.
  */
 auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
-  if (page_table_.count(page_id) == 0) return false;
+  if (page_table_.count(page_id) == 0) {
+    return false;
+  }
 
   auto frame = frames_[page_table_[page_id]];
 
@@ -358,16 +364,18 @@ void BufferPoolManager::FlushAllPages() {
  * @return std::optional<size_t> The pin count if the page exists, otherwise `std::nullopt`.
  */
 auto BufferPoolManager::GetPinCount(page_id_t page_id) -> std::optional<size_t> {
-  if (page_table_.count(page_id) == 0) return std::nullopt;
+  if (page_table_.count(page_id) == 0) {
+    return std::nullopt;
+  }
   auto frame = frames_[page_table_[page_id]];
 
   return frame->pin_count_;
 }
 
-page_id_t BufferPoolManager::GetRelatedPage(frame_id_t frame_id) {
-  for (auto it = page_table_.begin(); it != page_table_.end(); it++) {
-    if (it->second == frame_id) {
-      return it->first;
+auto BufferPoolManager::GetRelatedPage(frame_id_t frame_id) -> page_id_t {
+  for (auto &it : page_table_) {
+    if (it.second == frame_id) {
+      return it.first;
     }
   }
   return INVALID_PAGE_ID;

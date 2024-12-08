@@ -174,19 +174,15 @@ class BufferPoolManager {
 
   template <typename PageGuard>
   auto CreatePageGuard(page_id_t page_id, AccessType access_type) -> std::optional<PageGuard> {
+    frame_id_t frame_id;
+    std::shared_ptr<FrameHeader> frame;
     if (page_table_.count(page_id) > 0) {
-      int frame_id;
       {
         std::scoped_lock lk(*bpm_latch_);
         frame_id = page_table_[page_id];
       }
       replacer_->RecordAccess(frame_id, access_type);
-      auto frame = frames_[frame_id];
-
-      frame->pin_count_++;
-      replacer_->SetEvictable(frame_id, false);
-      return PageGuard(page_id, frame, replacer_, bpm_latch_);
-
+      frame = frames_[frame_id];
     } else if (!free_frames_.empty()) {
       int free_frame_id;
       {
@@ -196,7 +192,7 @@ class BufferPoolManager {
       }
       replacer_->RecordAccess(free_frame_id, access_type);
 
-      auto frame = frames_[free_frame_id];
+      frame = frames_[free_frame_id];
       {
         std::scoped_lock lk(*bpm_latch_);
         page_table_[page_id] = free_frame_id;
@@ -206,20 +202,19 @@ class BufferPoolManager {
       auto future = promise.get_future();
       disk_scheduler_->Schedule({false, frame->GetDataMut(), page_id, std::move(promise)});
       future.get();
-
-      frame->pin_count_++;
-      replacer_->SetEvictable(free_frame_id, false);
-      return PageGuard(page_id, frame, replacer_, bpm_latch_);
+      frame_id = free_frame_id;
     } else {
       std::optional<frame_id_t> opt_frame_id = replacer_->Evict();
 
-      if (!opt_frame_id.has_value()) return std::nullopt;
+      if (!opt_frame_id.has_value()) {
+        return std::nullopt;
+      }
 
-      auto frame_id = opt_frame_id.value();
+      frame_id = opt_frame_id.value();
       replacer_->Remove(frame_id);
       replacer_->RecordAccess(frame_id, access_type);
 
-      auto frame = frames_[frame_id];
+      frame = frames_[frame_id];
       if (frame->is_dirty_) {
         FlushPage(GetRelatedPage(frame_id));
         frame->is_dirty_ = false;
@@ -236,13 +231,16 @@ class BufferPoolManager {
       disk_scheduler_->Schedule({false, frame->GetDataMut(), page_id, std::move(promise)});
 
       future.get();
+    }
 
+    {
+      std::scoped_lock lk(*bpm_latch_);
       frame->pin_count_++;
       replacer_->SetEvictable(frame_id, false);
-      return PageGuard(page_id, frame, replacer_, bpm_latch_);
     }
+    return PageGuard(page_id, frame, replacer_, bpm_latch_);
   }
 
-  page_id_t GetRelatedPage(frame_id_t frame_id);
+  auto GetRelatedPage(frame_id_t frame_id) -> page_id_t;
 };
 }  // namespace bustub
